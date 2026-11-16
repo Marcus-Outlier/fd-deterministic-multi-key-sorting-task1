@@ -2811,17 +2811,18 @@ fn test_sort_multi_key() {
 }
 
 #[test]
-fn test_sort_type_files_before_folders() {
+fn test_sort_type_order() {
     let te = TestEnv::new(&["a_dir", "b_dir"], &["b_file.txt", "a_file.txt"]);
 
-    // Default test env also has "symlink" in root
+    // Default test env also has "symlink" in root.
+    // Type key orders: directories, then symlinks, then regular files, then anything else.
     te.assert_output_ordered(
         &["--sort", "type"],
-        "a_file.txt
-        b_file.txt
-        a_dir/
+        "a_dir/
         b_dir/
-        symlink",
+        symlink
+        a_file.txt
+        b_file.txt",
     );
 }
 
@@ -3054,7 +3055,10 @@ fn test_sort_case_sensitive() {
 
 #[test]
 fn test_sort_missing_last() {
-    let te = TestEnv::new(&[], &["no_ext", "b.txt", "a.rs"]);
+    let te = TestEnv::new(&["dir_no_size"], &["no_ext", "b.txt", "a.rs"]);
+    create_file_with_size(te.test_root().join("no_ext"), 50);
+    create_file_with_size(te.test_root().join("b.txt"), 10);
+    create_file_with_size(te.test_root().join("a.rs"), 100);
 
     // Default: missing extension sorts first
     te.assert_output_ordered(
@@ -3070,6 +3074,54 @@ fn test_sort_missing_last() {
         "a.rs
         b.txt
         no_ext",
+    );
+
+    // Size only exists for regular files; directories and symlinks count as missing size.
+    // Default: missing size (dir_no_size/ and symlink) sorts first
+    te.assert_output_ordered(
+        &["--sort", "size"],
+        "dir_no_size/
+        symlink
+        b.txt
+        no_ext
+        a.rs",
+    );
+
+    // With --sort-missing-last: missing size sorts last
+    te.assert_output_ordered(
+        &["--sort", "size", "--sort-missing-last"],
+        "b.txt
+        no_ext
+        a.rs
+        dir_no_size/
+        symlink",
+    );
+}
+
+#[test]
+fn test_sort_with_max_results() {
+    let te = TestEnv::new(&[], &["c.txt", "a.txt", "d.txt", "b.txt"]);
+
+    // Sort first, then apply max-results
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "name", "--max-results", "2"],
+        "a.txt
+        b.txt",
+    );
+
+    // Sort first, then reverse, then apply max-results
+    te.assert_output_ordered(
+        &[
+            "--type",
+            "f",
+            "--sort",
+            "name",
+            "--reverse",
+            "--max-results",
+            "2",
+        ],
+        "d.txt
+        c.txt",
     );
 }
 

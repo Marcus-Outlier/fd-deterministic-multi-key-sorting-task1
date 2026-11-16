@@ -219,11 +219,11 @@ pub fn mime_for_entry(entry: &DirEntry) -> &'static str {
 
 fn file_type_rank(entry: &DirEntry) -> Option<u8> {
     let ft = entry.file_type()?;
-    Some(if ft.is_file() {
+    Some(if ft.is_dir() {
         0
-    } else if ft.is_dir() {
-        1
     } else if ft.is_symlink() {
+        1
+    } else if ft.is_file() {
         2
     } else if filesystem::is_pipe(ft) {
         3
@@ -239,8 +239,8 @@ fn file_type_rank(entry: &DirEntry) -> Option<u8> {
 }
 
 fn entry_size(entry: &DirEntry) -> Option<u64> {
-    if entry.file_type().is_some_and(|ft| ft.is_dir()) {
-        return Some(0);
+    if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+        return None;
     }
     entry.metadata().map(|m| m.len())
 }
@@ -457,8 +457,8 @@ fn compare_by_field(a: &DirEntry, b: &DirEntry, field: SortField, config: &Confi
             |aa, ab| aa.cmp(&ab),
         ),
         SortField::Extension => compare_option(
-            a.path().extension(),
-            b.path().extension(),
+            a.path().extension().filter(|e| !e.is_empty()),
+            b.path().extension().filter(|e| !e.is_empty()),
             missing_last,
             |ea, eb| compare_osstr(ea, eb, config),
         ),

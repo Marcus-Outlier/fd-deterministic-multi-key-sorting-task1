@@ -890,7 +890,7 @@ pub enum SortField {
     Extension,
     /// Sort by directory depth
     Depth,
-    /// Sort by file type (files before directories)
+    /// Sort by file type (directories, then symlinks, then regular files, then others)
     #[value(alias = "filetype", alias = "file-type", alias = "file_type")]
     Type,
     /// Sort by MIME type
