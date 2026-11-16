@@ -2975,3 +2975,174 @@ fn test_sort_path_and_reverse() {
         a_dir/y.txt",
     );
 }
+
+#[test]
+fn test_sort_dirs_first_and_files_first() {
+    let te = TestEnv::new(&["b_dir", "a_dir"], &["b_file.txt", "a_file.txt"]);
+
+    // --dirs-first: directories in group 1, files and symlinks in group 2
+    te.assert_output_ordered(
+        &["--dirs-first", "--sort", "name"],
+        "a_dir/
+        b_dir/
+        a_file.txt
+        b_file.txt
+        symlink",
+    );
+
+    // --files-first: regular files in group 1, directories and symlinks in group 2
+    te.assert_output_ordered(
+        &["--files-first", "--sort", "name"],
+        "a_file.txt
+        b_file.txt
+        a_dir/
+        b_dir/
+        symlink",
+    );
+
+    // If both are passed, --files-first wins regardless of argument order
+    te.assert_output_ordered(
+        &["--files-first", "--dirs-first", "--sort", "name"],
+        "a_file.txt
+        b_file.txt
+        a_dir/
+        b_dir/
+        symlink",
+    );
+    te.assert_output_ordered(
+        &["--dirs-first", "--files-first", "--sort", "name"],
+        "a_file.txt
+        b_file.txt
+        a_dir/
+        b_dir/
+        symlink",
+    );
+
+    // --reverse reverses the final sorted order (including groups)
+    te.assert_output_ordered(
+        &["--dirs-first", "--sort", "name", "--reverse"],
+        "symlink
+        b_file.txt
+        a_file.txt
+        b_dir/
+        a_dir/",
+    );
+}
+
+#[test]
+fn test_sort_case_sensitive() {
+    let te = TestEnv::new(&[], &["b.txt", "A.txt", "a.txt", "B.txt"]);
+
+    // Default: case-insensitive (with deterministic fallback)
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "name"],
+        "A.txt
+        a.txt
+        B.txt
+        b.txt",
+    );
+
+    // With --sort-case-sensitive: uppercase ASCII sorts before lowercase ASCII
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "name", "--sort-case-sensitive"],
+        "A.txt
+        B.txt
+        a.txt
+        b.txt",
+    );
+}
+
+#[test]
+fn test_sort_missing_last() {
+    let te = TestEnv::new(&[], &["no_ext", "b.txt", "a.rs"]);
+
+    // Default: missing extension sorts first
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "extension"],
+        "no_ext
+        a.rs
+        b.txt",
+    );
+
+    // With --sort-missing-last: missing extension sorts last
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "extension", "--sort-missing-last"],
+        "a.rs
+        b.txt
+        no_ext",
+    );
+}
+
+#[test]
+fn test_sort_natural() {
+    let te = TestEnv::new(&[], &["file10.txt", "file2.txt", "file1.txt", "file20.txt"]);
+
+    // Without --sort-natural: lexicographical order
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "name"],
+        "file1.txt
+        file10.txt
+        file2.txt
+        file20.txt",
+    );
+
+    // With --sort-natural: numeric chunks compared by value
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "name", "--sort-natural"],
+        "file1.txt
+        file2.txt
+        file10.txt
+        file20.txt",
+    );
+}
+
+#[test]
+fn test_sort_seed() {
+    let te = TestEnv::new(&[], &["a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt"]);
+
+    let out1 = te.assert_success_and_get_output(
+        ".",
+        &["--type", "f", "--sort", "random", "--sort-seed", "42"],
+    );
+    let out2 = te.assert_success_and_get_output(
+        ".",
+        &["--type", "f", "--sort", "random", "--sort-seed", "42"],
+    );
+    let out3 = te.assert_success_and_get_output(
+        ".",
+        &["--type", "f", "--sort", "random", "--sort-seed", "99999"],
+    );
+
+    assert_eq!(out1.stdout, out2.stdout);
+    assert_ne!(out1.stdout, out3.stdout);
+}
+
+#[test]
+fn test_sort_conflicts_with_exec_and_list_details() {
+    let te = TestEnv::new(DEFAULT_DIRS, DEFAULT_FILES);
+
+    let sort_flags: &[&[&str]] = &[
+        &["--sort", "name"],
+        &["--reverse"],
+        &["--dirs-first"],
+        &["--files-first"],
+        &["--sort-case-sensitive"],
+        &["--sort-missing-last"],
+        &["--sort-natural"],
+        &["--sort-seed", "123"],
+    ];
+
+    for flag in sort_flags {
+        let mut args_exec = flag.to_vec();
+        args_exec.extend_from_slice(&["--exec", "echo"]);
+        te.assert_failure(&args_exec);
+
+        let mut args_exec_batch = flag.to_vec();
+        args_exec_batch.extend_from_slice(&["--exec-batch", "echo"]);
+        te.assert_failure(&args_exec_batch);
+
+        let mut args_list_details = flag.to_vec();
+        args_list_details.push("--list-details");
+        te.assert_failure(&args_list_details);
+    }
+}

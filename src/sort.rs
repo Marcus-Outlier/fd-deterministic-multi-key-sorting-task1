@@ -125,7 +125,7 @@ fn get_mime_map() -> &'static HashMap<String, &'static str> {
             ("svg", "image/svg+xml"),
             ("swf", "application/x-shockwave-flash"),
             ("tar", "application/x-tar"),
-            ("tcl", "application/x-tcl"),
+            ("tcl", "text/x-tcl"),
             ("tex", "application/x-tex"),
             ("tgz", "application/gzip"),
             ("tif", "image/tiff"),
@@ -217,28 +217,25 @@ pub fn mime_for_entry(entry: &DirEntry) -> &'static str {
     "application/octet-stream"
 }
 
-fn file_type_rank(entry: &DirEntry) -> u8 {
-    if let Some(ft) = entry.file_type() {
-        if ft.is_file() {
-            0
-        } else if ft.is_dir() {
-            1
-        } else if ft.is_symlink() {
-            2
-        } else if filesystem::is_pipe(ft) {
-            3
-        } else if filesystem::is_socket(ft) {
-            4
-        } else if filesystem::is_char_device(ft) {
-            5
-        } else if filesystem::is_block_device(ft) {
-            6
-        } else {
-            7
-        }
+fn file_type_rank(entry: &DirEntry) -> Option<u8> {
+    let ft = entry.file_type()?;
+    Some(if ft.is_file() {
+        0
+    } else if ft.is_dir() {
+        1
+    } else if ft.is_symlink() {
+        2
+    } else if filesystem::is_pipe(ft) {
+        3
+    } else if filesystem::is_socket(ft) {
+        4
+    } else if filesystem::is_char_device(ft) {
+        5
+    } else if filesystem::is_block_device(ft) {
+        6
     } else {
-        8
-    }
+        7
+    })
 }
 
 fn entry_size(entry: &DirEntry) -> Option<u64> {
@@ -268,35 +265,216 @@ fn entry_depth(entry: &DirEntry) -> usize {
     })
 }
 
-fn compare_option_asc<T: Ord>(a: Option<T>, b: Option<T>) -> Ordering {
+fn compare_option<T, F>(a: Option<T>, b: Option<T>, missing_last: bool, cmp_fn: F) -> Ordering
+where
+    F: FnOnce(T, T) -> Ordering,
+{
     match (a, b) {
-        (Some(a), Some(b)) => a.cmp(&b),
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
+        (Some(a), Some(b)) => cmp_fn(a, b),
+        (Some(_), None) => {
+            if missing_last {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            }
+        }
+        (None, Some(_)) => {
+            if missing_last {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            }
+        }
         (None, None) => Ordering::Equal,
     }
 }
 
+fn compare_bytes(a: &[u8], b: &[u8], case_sensitive: bool, natural: bool) -> Ordering {
+    let ord = if natural {
+        compare_natural_bytes(a, b, case_sensitive)
+    } else if case_sensitive {
+        a.cmp(b)
+    } else {
+        compare_case_insensitive_bytes(a, b)
+    };
+
+    if ord == Ordering::Equal && !case_sensitive {
+        a.cmp(b)
+    } else {
+        ord
+    }
+}
+
+fn compare_case_insensitive_bytes(a: &[u8], b: &[u8]) -> Ordering {
+    for (&ca, &cb) in a.iter().zip(b.iter()) {
+        let ord = ca.to_ascii_lowercase().cmp(&cb.to_ascii_lowercase());
+        if ord != Ordering::Equal {
+            return ord;
+        }
+    }
+    a.len().cmp(&b.len())
+}
+
+fn compare_natural_bytes(a: &[u8], b: &[u8], case_sensitive: bool) -> Ordering {
+    let mut ia = 0;
+    let mut ib = 0;
+
+    while ia < a.len() && ib < b.len() {
+        let da = a[ia].is_ascii_digit();
+        let db = b[ib].is_ascii_digit();
+
+        if da && db {
+            // Find end of numeric runs
+            let start_a = ia;
+            while ia < a.len() && a[ia].is_ascii_digit() {
+                ia += 1;
+            }
+            let start_b = ib;
+            while ib < b.len() && b[ib].is_ascii_digit() {
+                ib += 1;
+            }
+
+            let num_a = &a[start_a..ia];
+            let num_b = &b[start_b..ib];
+
+            // Strip leading zeros
+            let trimmed_a = strip_leading_zeros(num_a);
+            let trimmed_b = strip_leading_zeros(num_b);
+
+            // Compare by number of significant digits first, then lexicographically
+            let ord = trimmed_a
+                .len()
+                .cmp(&trimmed_b.len())
+                .then_with(|| trimmed_a.cmp(trimmed_b))
+                .then_with(|| num_a.len().cmp(&num_b.len()));
+
+            if ord != Ordering::Equal {
+                return ord;
+            }
+        } else {
+            let ca = if case_sensitive {
+                a[ia]
+            } else {
+                a[ia].to_ascii_lowercase()
+            };
+            let cb = if case_sensitive {
+                b[ib]
+            } else {
+                b[ib].to_ascii_lowercase()
+            };
+            let ord = ca.cmp(&cb);
+            if ord != Ordering::Equal {
+                return ord;
+            }
+            ia += 1;
+            ib += 1;
+        }
+    }
+
+    a.len().cmp(&b.len())
+}
+
+fn strip_leading_zeros(s: &[u8]) -> &[u8] {
+    let first_non_zero = s.iter().position(|&b| b != b'0').unwrap_or(s.len());
+    &s[first_non_zero..]
+}
+
+fn compare_osstr(a: &OsStr, b: &OsStr, config: &Config) -> Ordering {
+    let bytes_a = filesystem::osstr_to_bytes(a);
+    let bytes_b = filesystem::osstr_to_bytes(b);
+    compare_bytes(
+        &bytes_a,
+        &bytes_b,
+        config.sort_case_sensitive,
+        config.sort_natural,
+    )
+}
+
+fn group_rank(entry: &DirEntry, config: &Config) -> u8 {
+    // If both --dirs-first and --files-first are passed, --files-first wins.
+    if config.files_first {
+        if entry.file_type().is_some_and(|ft| ft.is_file()) {
+            0
+        } else {
+            1
+        }
+    } else if config.dirs_first {
+        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+            0
+        } else {
+            1
+        }
+    } else {
+        0
+    }
+}
+
+fn hash_entry_with_seed(seed: u64, path: &OsStr) -> u64 {
+    // SplitMix64-inspired mixing with FNV-1a over path bytes for deterministic pseudo-random key
+    let bytes = filesystem::osstr_to_bytes(path);
+    let mut h = seed ^ 0xcbf29ce484222325;
+    for &b in bytes.iter() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h = (h ^ (h >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    h = (h ^ (h >> 27)).wrapping_mul(0x94d049bb133111eb);
+    h ^ (h >> 31)
+}
+
 fn compare_by_field(a: &DirEntry, b: &DirEntry, field: SortField, config: &Config) -> Ordering {
+    let missing_last = config.sort_missing_last;
     match field {
         SortField::Name => {
             let name_a = a.path().file_name().unwrap_or_else(|| a.path().as_os_str());
             let name_b = b.path().file_name().unwrap_or_else(|| b.path().as_os_str());
-            name_a.cmp(name_b)
+            compare_osstr(name_a, name_b, config)
         }
-        SortField::Size => compare_option_asc(entry_size(a), entry_size(b)),
-        SortField::Path => a.stripped_path(config).cmp(b.stripped_path(config)),
-        SortField::Modified => compare_option_asc(entry_modified(a), entry_modified(b)),
-        SortField::Created => compare_option_asc(entry_created(a), entry_created(b)),
-        SortField::Accessed => compare_option_asc(entry_accessed(a), entry_accessed(b)),
-        SortField::Extension => {
-            let ext_a = a.path().extension().unwrap_or_else(|| OsStr::new(""));
-            let ext_b = b.path().extension().unwrap_or_else(|| OsStr::new(""));
-            ext_a.cmp(ext_b)
-        }
+        SortField::Size => compare_option(entry_size(a), entry_size(b), missing_last, |sa, sb| {
+            sa.cmp(&sb)
+        }),
+        SortField::Path => compare_osstr(
+            a.stripped_path(config).as_os_str(),
+            b.stripped_path(config).as_os_str(),
+            config,
+        ),
+        SortField::Modified => compare_option(
+            entry_modified(a),
+            entry_modified(b),
+            missing_last,
+            |ma, mb| ma.cmp(&mb),
+        ),
+        SortField::Created => compare_option(
+            entry_created(a),
+            entry_created(b),
+            missing_last,
+            |ca, cb| ca.cmp(&cb),
+        ),
+        SortField::Accessed => compare_option(
+            entry_accessed(a),
+            entry_accessed(b),
+            missing_last,
+            |aa, ab| aa.cmp(&ab),
+        ),
+        SortField::Extension => compare_option(
+            a.path().extension(),
+            b.path().extension(),
+            missing_last,
+            |ea, eb| compare_osstr(ea, eb, config),
+        ),
         SortField::Depth => entry_depth(a).cmp(&entry_depth(b)),
-        SortField::Type => file_type_rank(a).cmp(&file_type_rank(b)),
-        SortField::Mime => mime_for_entry(a).cmp(mime_for_entry(b)),
+        SortField::Type => compare_option(
+            file_type_rank(a),
+            file_type_rank(b),
+            missing_last,
+            |ta, tb| ta.cmp(&tb),
+        ),
+        SortField::Mime => compare_bytes(
+            mime_for_entry(a).as_bytes(),
+            mime_for_entry(b).as_bytes(),
+            config.sort_case_sensitive,
+            config.sort_natural,
+        ),
         SortField::Length => {
             let len_a = a
                 .path()
@@ -319,70 +497,89 @@ fn compare_by_field(a: &DirEntry, b: &DirEntry, field: SortField, config: &Confi
     }
 }
 
+fn fallback_path_cmp(a: &DirEntry, b: &DirEntry, config: &Config) -> Ordering {
+    compare_osstr(
+        a.stripped_path(config).as_os_str(),
+        b.stripped_path(config).as_os_str(),
+        config,
+    )
+    .then_with(|| a.stripped_path(config).cmp(b.stripped_path(config)))
+    .then_with(|| a.path().cmp(b.path()))
+}
+
 pub fn sort_entries(entries: &mut [DirEntry], config: &Config) {
-    if config.sort.is_empty() {
-        entries.sort_by(|a, b| {
-            let ord = a
-                .stripped_path(config)
-                .cmp(b.stripped_path(config))
-                .then_with(|| a.path().cmp(b.path()));
-            if config.reverse { ord.reverse() } else { ord }
-        });
+    if !config.is_sorting() {
+        entries.sort();
         return;
     }
 
     let has_random = config.sort.contains(&SortField::Random);
 
     if has_random {
-        // Assign random keys to each entry so random sorting is a valid total order
-        let mut keyed: Vec<(u64, usize)> =
-            (0..entries.len()).map(|i| (fastrand::u64(..), i)).collect();
+        let mut rng = config
+            .sort_seed
+            .map(fastrand::Rng::with_seed)
+            .unwrap_or_default();
+
+        let mut keyed: Vec<(u64, usize)> = entries
+            .iter()
+            .enumerate()
+            .map(|(i, entry)| {
+                let key = if let Some(seed) = config.sort_seed {
+                    hash_entry_with_seed(seed, entry.stripped_path(config).as_os_str())
+                } else {
+                    rng.u64(..)
+                };
+                (key, i)
+            })
+            .collect();
 
         keyed.sort_by(|&(rand_a, idx_a), &(rand_b, idx_b)| {
             let a = &entries[idx_a];
             let b = &entries[idx_b];
-            let mut ord = Ordering::Equal;
-            for &field in &config.sort {
-                ord = match field {
-                    SortField::Random => rand_a.cmp(&rand_b),
-                    _ => compare_by_field(a, b, field, config),
-                };
-                if ord != Ordering::Equal {
-                    break;
+
+            let mut ord = group_rank(a, config).cmp(&group_rank(b, config));
+            if ord == Ordering::Equal {
+                for &field in &config.sort {
+                    ord = match field {
+                        SortField::Random => rand_a.cmp(&rand_b),
+                        _ => compare_by_field(a, b, field, config),
+                    };
+                    if ord != Ordering::Equal {
+                        break;
+                    }
                 }
             }
             if ord == Ordering::Equal {
-                ord = a
-                    .stripped_path(config)
-                    .cmp(b.stripped_path(config))
-                    .then_with(|| a.path().cmp(b.path()));
+                ord = fallback_path_cmp(a, b, config);
             }
             if config.reverse { ord.reverse() } else { ord }
         });
 
-        // Apply permutation in-place or via temporary Vec
-        let mut perm: Vec<usize> = keyed.into_iter().map(|(_, idx)| idx).collect();
-        for i in 0..entries.len() {
-            while perm[i] != i {
-                let target = perm[i];
-                entries.swap(i, target);
-                perm.swap(i, target);
-            }
+        let mut sorted: Vec<Option<DirEntry>> = entries.iter_mut().map(|_| None).collect();
+        for (new_pos, (_, old_idx)) in keyed.into_iter().enumerate() {
+            // Temporary placeholder to move out of slice and back in
+            sorted[new_pos] = Some(std::mem::replace(
+                &mut entries[old_idx],
+                DirEntry::broken_symlink(std::path::PathBuf::new()),
+            ));
+        }
+        for (slot, val) in entries.iter_mut().zip(sorted) {
+            *slot = val.unwrap();
         }
     } else {
         entries.sort_by(|a, b| {
-            let mut ord = Ordering::Equal;
-            for &field in &config.sort {
-                ord = compare_by_field(a, b, field, config);
-                if ord != Ordering::Equal {
-                    break;
+            let mut ord = group_rank(a, config).cmp(&group_rank(b, config));
+            if ord == Ordering::Equal {
+                for &field in &config.sort {
+                    ord = compare_by_field(a, b, field, config);
+                    if ord != Ordering::Equal {
+                        break;
+                    }
                 }
             }
             if ord == Ordering::Equal {
-                ord = a
-                    .stripped_path(config)
-                    .cmp(b.stripped_path(config))
-                    .then_with(|| a.path().cmp(b.path()));
+                ord = fallback_path_cmp(a, b, config);
             }
             if config.reverse { ord.reverse() } else { ord }
         });

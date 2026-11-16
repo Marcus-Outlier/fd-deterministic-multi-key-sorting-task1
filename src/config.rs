@@ -140,11 +140,41 @@ pub struct Config {
 
     /// Whether to reverse the sort order.
     pub reverse: bool,
+
+    /// Whether to group directories first when sorting.
+    pub dirs_first: bool,
+
+    /// Whether to group regular files first when sorting.
+    pub files_first: bool,
+
+    /// Whether string comparisons in sorting should be case-sensitive.
+    pub sort_case_sensitive: bool,
+
+    /// Whether missing metadata values should sort after present values.
+    pub sort_missing_last: bool,
+
+    /// Whether string comparisons in sorting should use natural order.
+    pub sort_natural: bool,
+
+    /// Optional seed for deterministic random sorting.
+    pub sort_seed: Option<u64>,
 }
 
 impl Config {
     /// Check whether results are being printed.
     pub fn is_printing(&self) -> bool {
         self.command.is_none()
+    }
+
+    /// Check whether any sorting or ordering option is enabled.
+    pub fn is_sorting(&self) -> bool {
+        !self.sort.is_empty()
+            || self.reverse
+            || self.dirs_first
+            || self.files_first
+            || self.sort_case_sensitive
+            || self.sort_missing_last
+            || self.sort_natural
+            || self.sort_seed.is_some()
     }
 }

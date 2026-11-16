@@ -184,7 +184,7 @@ impl<'a, W: Write> ReceiverBuffer<'a, W> {
     /// Receive the next worker result.
     fn recv(&self) -> Result<Batch, RecvTimeoutError> {
         match self.mode {
-            ReceiverMode::Buffering if self.config.sort.is_empty() && !self.config.reverse => {
+            ReceiverMode::Buffering if !self.config.is_sorting() => {
                 // Wait at most until we should switch to streaming
                 self.rx.recv_deadline(self.deadline)
             }
@@ -197,7 +197,7 @@ impl<'a, W: Write> ReceiverBuffer<'a, W> {
 
     /// Wait for a result or state change.
     fn poll(&mut self) -> Result<(), ExitCode> {
-        let is_sorting = !self.config.sort.is_empty() || self.config.reverse;
+        let is_sorting = self.config.is_sorting();
         match self.recv() {
             Ok(batch) => {
                 for result in batch {

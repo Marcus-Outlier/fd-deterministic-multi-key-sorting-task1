@@ -27,7 +27,8 @@ use crate::filter::SizeFilter;
     max_term_width = 98,
     args_override_self = true,
     group(ArgGroup::new("execs").args(&["exec", "exec_batch", "list_details"]).conflicts_with_all(&[
-            "max_results", "quiet", "max_one_result"])),
+            "max_results", "quiet", "max_one_result", "sort", "reverse", "dirs_first", "files_first",
+            "sort_case_sensitive", "sort_missing_last", "sort_natural", "sort_seed"])),
 )]
 pub struct Opts {
     /// Include hidden directories and files in the search results (default:
@@ -559,6 +560,56 @@ pub struct Opts {
     /// Reverse the sort order
     #[arg(long, help = "Reverse the sort order", long_help)]
     pub reverse: bool,
+
+    /// Group directories before other entries when sorting
+    #[arg(
+        long,
+        help = "Group directories before other entries when sorting",
+        long_help
+    )]
+    pub dirs_first: bool,
+
+    /// Group regular files before other entries when sorting
+    #[arg(
+        long,
+        help = "Group regular files before other entries when sorting",
+        long_help
+    )]
+    pub files_first: bool,
+
+    /// Perform case-sensitive string comparisons when sorting
+    #[arg(
+        long,
+        help = "Use case-sensitive string comparisons when sorting",
+        long_help
+    )]
+    pub sort_case_sensitive: bool,
+
+    /// Place entries with missing sort metadata after entries with valid metadata
+    #[arg(
+        long,
+        help = "Place entries with missing sort metadata last",
+        long_help
+    )]
+    pub sort_missing_last: bool,
+
+    /// Use natural (version) sort order for string comparisons when sorting
+    #[arg(
+        long,
+        help = "Use natural sort order for strings when sorting",
+        long_help
+    )]
+    pub sort_natural: bool,
+
+    /// Seed for deterministic random sorting ('--sort random')
+    #[arg(
+        long,
+        value_name = "seed",
+        value_parser = value_parser!(u64),
+        help = "Seed for random sorting",
+        long_help
+    )]
+    pub sort_seed: Option<u64>,
 
     ///Limit the number of search results to 'count' and quit immediately.
     #[arg(

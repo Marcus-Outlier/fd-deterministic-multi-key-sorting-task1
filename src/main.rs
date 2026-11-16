@@ -330,6 +330,12 @@ fn construct_config(mut opts: Opts, pattern_regexps: &[String]) -> Result<Config
         ignore_contain: opts.ignore_contain,
         sort: opts.sort,
         reverse: opts.reverse,
+        dirs_first: opts.dirs_first && !opts.files_first,
+        files_first: opts.files_first,
+        sort_case_sensitive: opts.sort_case_sensitive,
+        sort_missing_last: opts.sort_missing_last,
+        sort_natural: opts.sort_natural,
+        sort_seed: opts.sort_seed,
     })
 }
 
