@@ -3,6 +3,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use lscolors::LsColors;
 use regex::bytes::RegexSet;
 
+use crate::cli::SortField;
 use crate::exec::CommandSet;
 use crate::filetypes::FileTypes;
 #[cfg(unix)]
@@ -133,6 +134,12 @@ pub struct Config {
 
     /// Names that should stop traversal down their parent. (e.g. https://bford.info/cachedir/).
     pub ignore_contain: Vec<String>,
+
+    /// Sort criteria for search results.
+    pub sort: Vec<SortField>,
+
+    /// Whether to reverse the sort order.
+    pub reverse: bool,
 }
 
 impl Config {

@@ -275,6 +275,28 @@ impl TestEnv {
         }
     }
 
+    /// Assert that calling *fd* with the specified arguments produces the exact ordered output.
+    pub fn assert_output_ordered(&self, args: &[&str], expected: &str) {
+        let output = self.assert_success_and_get_output(".", args);
+        let actual_lines = String::from_utf8_lossy(&output.stdout)
+            .replace('\0', "NULL\n")
+            .lines()
+            .map(|l| l.replace('/', std::path::MAIN_SEPARATOR_STR))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let expected_lines = expected
+            .lines()
+            .map(|l| l.trim_start().replace('/', std::path::MAIN_SEPARATOR_STR))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if expected_lines != actual_lines {
+            panic!(
+                "{}",
+                format_output_error(args, &expected_lines, &actual_lines)
+            );
+        }
+    }
+
     /// Assert that calling *fd* with the specified arguments produces the expected error,
     /// and does not succeed.
     pub fn assert_failure_with_error(&self, args: &[&str], expected: &str) {

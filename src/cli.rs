@@ -544,6 +544,22 @@ pub struct Opts {
     #[arg(long, hide = true, value_parser = parse_millis)]
     pub max_buffer_time: Option<Duration>,
 
+    /// Sort search results by the given criterion. Can be specified multiple times
+    /// to break ties in order. Final ties are broken by full path.
+    #[arg(
+        long,
+        value_name = "field",
+        action = ArgAction::Append,
+        value_enum,
+        help = "Sort search results by criterion",
+        long_help
+    )]
+    pub sort: Vec<SortField>,
+
+    /// Reverse the sort order
+    #[arg(long, help = "Reverse the sort order", long_help)]
+    pub reverse: bool,
+
     ///Limit the number of search results to 'count' and quit immediately.
     #[arg(
         long,
@@ -797,6 +813,47 @@ pub enum FileType {
     Socket,
     #[value(alias = "p")]
     Pipe,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug, ValueEnum)]
+pub enum SortField {
+    /// Sort by file name (basename)
+    #[value(alias = "filename", alias = "basename")]
+    Name,
+    /// Sort by file size
+    Size,
+    /// Sort by file path
+    #[value(alias = "full-path", alias = "full_path")]
+    Path,
+    /// Sort by file modification time
+    #[value(alias = "mtime", alias = "changed")]
+    Modified,
+    /// Sort by file creation time
+    #[value(alias = "btime", alias = "birth", alias = "birthtime", alias = "ctime")]
+    Created,
+    /// Sort by file access time
+    #[value(alias = "atime")]
+    Accessed,
+    /// Sort by file extension
+    #[value(alias = "ext")]
+    Extension,
+    /// Sort by directory depth
+    Depth,
+    /// Sort by file type (files before directories)
+    #[value(alias = "filetype", alias = "file-type", alias = "file_type")]
+    Type,
+    /// Sort by MIME type
+    #[value(alias = "mimetype", alias = "mime-type", alias = "mime_type")]
+    Mime,
+    /// Sort by file name length
+    #[value(alias = "name-length", alias = "name_length", alias = "namelength")]
+    Length,
+    /// Sort by file path length
+    #[value(alias = "path_length", alias = "pathlength")]
+    PathLength,
+    /// Sort randomly
+    #[value(alias = "rand", alias = "none")]
+    Random,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, ValueEnum)]

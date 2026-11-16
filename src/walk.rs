@@ -22,6 +22,7 @@ use crate::exec;
 use crate::exit_codes::{ExitCode, merge_exitcodes};
 use crate::filesystem;
 use crate::output;
+use crate::sort;
 
 /// The receiver thread can either be buffering results or directly streaming to the console.
 #[derive(PartialEq)]
@@ -183,11 +184,11 @@ impl<'a, W: Write> ReceiverBuffer<'a, W> {
     /// Receive the next worker result.
     fn recv(&self) -> Result<Batch, RecvTimeoutError> {
         match self.mode {
-            ReceiverMode::Buffering => {
+            ReceiverMode::Buffering if self.config.sort.is_empty() && !self.config.reverse => {
                 // Wait at most until we should switch to streaming
                 self.rx.recv_deadline(self.deadline)
             }
-            ReceiverMode::Streaming => {
+            ReceiverMode::Buffering | ReceiverMode::Streaming => {
                 // Wait however long it takes for a result
                 Ok(self.rx.recv()?)
             }
@@ -196,6 +197,7 @@ impl<'a, W: Write> ReceiverBuffer<'a, W> {
 
     /// Wait for a result or state change.
     fn poll(&mut self) -> Result<(), ExitCode> {
+        let is_sorting = !self.config.sort.is_empty() || self.config.reverse;
         match self.recv() {
             Ok(batch) => {
                 for result in batch {
@@ -208,7 +210,7 @@ impl<'a, W: Write> ReceiverBuffer<'a, W> {
                             match self.mode {
                                 ReceiverMode::Buffering => {
                                     self.buffer.push(dir_entry);
-                                    if self.buffer.len() > MAX_BUFFER_LENGTH {
+                                    if !is_sorting && self.buffer.len() > MAX_BUFFER_LENGTH {
                                         self.stream()?;
                                     }
                                 }
@@ -218,7 +220,8 @@ impl<'a, W: Write> ReceiverBuffer<'a, W> {
                             }
 
                             self.num_results += 1;
-                            if let Some(max_results) = self.config.max_results
+                            if !is_sorting
+                                && let Some(max_results) = self.config.max_results
                                 && self.num_results >= max_results
                             {
                                 return self.stop();
@@ -238,7 +241,9 @@ impl<'a, W: Write> ReceiverBuffer<'a, W> {
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
-                self.stream()?;
+                if !is_sorting {
+                    self.stream()?;
+                }
             }
             Err(RecvTimeoutError::Disconnected) => {
                 return self.stop();
@@ -281,7 +286,10 @@ impl<'a, W: Write> ReceiverBuffer<'a, W> {
     /// Stop looping.
     fn stop(&mut self) -> Result<(), ExitCode> {
         if self.mode == ReceiverMode::Buffering {
-            self.buffer.sort();
+            sort::sort_entries(&mut self.buffer, self.config);
+            if let Some(max_results) = self.config.max_results {
+                self.buffer.truncate(max_results);
+            }
             self.stream()?;
         }
 

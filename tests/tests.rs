@@ -2758,3 +2758,220 @@ fn test_ignore_contain_precedence_over_root_check() {
     let expected = "";
     te.assert_output(&["--ignore-contain=CACHEDIR.TAG", "."], expected);
 }
+
+#[test]
+fn test_sort_name() {
+    let te = TestEnv::new(
+        &["dir_b", "dir_a"],
+        &["dir_b/a.txt", "dir_a/b.txt", "dir_a/a.txt", "c.txt"],
+    );
+
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "name"],
+        "dir_a/a.txt
+        dir_b/a.txt
+        dir_a/b.txt
+        c.txt",
+    );
+}
+
+#[test]
+fn test_sort_size_and_tiebreaker() {
+    let te = TestEnv::new(&["sub"], &[]);
+    create_file_with_size(te.test_root().join("b_large.txt"), 100);
+    create_file_with_size(te.test_root().join("a_small.txt"), 10);
+    create_file_with_size(te.test_root().join("sub/c_tie.txt"), 50);
+    create_file_with_size(te.test_root().join("a_tie.txt"), 50);
+
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "size"],
+        "a_small.txt
+        a_tie.txt
+        sub/c_tie.txt
+        b_large.txt",
+    );
+}
+
+#[test]
+fn test_sort_multi_key() {
+    let te = TestEnv::new(&["d1", "d2"], &[]);
+    create_file_with_size(te.test_root().join("d2/b.txt"), 10);
+    create_file_with_size(te.test_root().join("d1/b.txt"), 10);
+    create_file_with_size(te.test_root().join("d2/a.txt"), 10);
+    create_file_with_size(te.test_root().join("d1/c.txt"), 5);
+
+    // Sort by size, then by name, then tie-break by path
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "size", "--sort", "name"],
+        "d1/c.txt
+        d2/a.txt
+        d1/b.txt
+        d2/b.txt",
+    );
+}
+
+#[test]
+fn test_sort_type_files_before_folders() {
+    let te = TestEnv::new(&["a_dir", "b_dir"], &["b_file.txt", "a_file.txt"]);
+
+    // Default test env also has "symlink" in root
+    te.assert_output_ordered(
+        &["--sort", "type"],
+        "a_file.txt
+        b_file.txt
+        a_dir/
+        b_dir/
+        symlink",
+    );
+}
+
+#[test]
+fn test_sort_extension() {
+    let te = TestEnv::new(&[], &["file_no_ext", "b.rs", "a.txt", "a.rs", "c.md"]);
+
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "extension"],
+        "file_no_ext
+        c.md
+        a.rs
+        b.rs
+        a.txt",
+    );
+}
+
+#[test]
+fn test_sort_depth() {
+    let te = TestEnv::new(&["a/b/c"], &["a/b/c/deep.txt", "root.txt", "a/mid.txt"]);
+
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "depth"],
+        "root.txt
+        a/mid.txt
+        a/b/c/deep.txt",
+    );
+}
+
+#[test]
+fn test_sort_length_and_path_length() {
+    let te = TestEnv::new(
+        &["long_directory_name", "d"],
+        &["long_directory_name/a.txt", "d/longer_name.txt", "mid.txt"],
+    );
+
+    // Sort by filename length: "a.txt" (5), "mid.txt" (7), "longer_name.txt" (15)
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "length"],
+        "long_directory_name/a.txt
+        mid.txt
+        d/longer_name.txt",
+    );
+
+    // Sort by path length: "mid.txt" (7), "d/longer_name.txt" (17), "long_directory_name/a.txt" (25)
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "path-length"],
+        "mid.txt
+        d/longer_name.txt
+        long_directory_name/a.txt",
+    );
+}
+
+#[test]
+fn test_sort_mime() {
+    let te = TestEnv::new(&["dir"], &["a.json", "b.png", "c.txt"]);
+
+    // application/json < image/png < inode/directory < inode/symlink < text/plain
+    te.assert_output_ordered(
+        &["--sort", "mime"],
+        "a.json
+        b.png
+        dir/
+        symlink
+        c.txt",
+    );
+}
+
+#[test]
+fn test_sort_modified_and_accessed() {
+    use filetime::{FileTime, set_file_times};
+
+    let te = TestEnv::new(&[], &["f1.txt", "f2.txt", "f3.txt"]);
+    let root = te.test_root();
+
+    // f1: mtime=300, atime=100
+    // f2: mtime=100, atime=300
+    // f3: mtime=200, atime=200
+    set_file_times(
+        root.join("f1.txt"),
+        FileTime::from_unix_time(100, 0),
+        FileTime::from_unix_time(300, 0),
+    )
+    .unwrap();
+    set_file_times(
+        root.join("f2.txt"),
+        FileTime::from_unix_time(300, 0),
+        FileTime::from_unix_time(100, 0),
+    )
+    .unwrap();
+    set_file_times(
+        root.join("f3.txt"),
+        FileTime::from_unix_time(200, 0),
+        FileTime::from_unix_time(200, 0),
+    )
+    .unwrap();
+
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "modified"],
+        "f2.txt
+        f3.txt
+        f1.txt",
+    );
+
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "accessed"],
+        "f1.txt
+        f3.txt
+        f2.txt",
+    );
+}
+
+#[test]
+fn test_sort_created_and_random() {
+    let te = TestEnv::new(&[], &["a.txt", "b.txt", "c.txt"]);
+
+    // Ensure created and random run and return all files
+    te.assert_output(
+        &["--type", "f", "--sort", "created"],
+        "a.txt
+        b.txt
+        c.txt",
+    );
+
+    te.assert_output(
+        &["--type", "f", "--sort", "random"],
+        "a.txt
+        b.txt
+        c.txt",
+    );
+}
+
+#[test]
+fn test_sort_path_and_reverse() {
+    let te = TestEnv::new(
+        &["b_dir", "a_dir"],
+        &["b_dir/x.txt", "a_dir/y.txt", "c.txt"],
+    );
+
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "path"],
+        "a_dir/y.txt
+        b_dir/x.txt
+        c.txt",
+    );
+
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "path", "--reverse"],
+        "c.txt
+        b_dir/x.txt
+        a_dir/y.txt",
+    );
+}
