@@ -3259,3 +3259,88 @@ fn test_sort_conflicts_with_exec_and_list_details() {
         te.assert_failure(&args_list_details);
     }
 }
+
+#[test]
+fn test_sort_multiple_search_paths_and_duplicates() {
+    let te = TestEnv::new(
+        &["dir2/sub", "dir1/sub"],
+        &[
+            "dir2/dup.txt",
+            "dir1/dup.txt",
+            "dir2/sub/dup.txt",
+            "dir1/OnlyCase.txt",
+            "dir2/onlycase.txt",
+        ],
+    );
+
+    // Multiple search paths in one command + duplicate filenames in different folders + case differences
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "name", ".", "dir2", "dir1"],
+        "dir1/dup.txt
+        dir2/dup.txt
+        dir2/sub/dup.txt
+        dir1/OnlyCase.txt
+        dir2/onlycase.txt",
+    );
+}
+
+#[test]
+fn test_sort_dirs_first_reverse_max_depth() {
+    let te = TestEnv::new(
+        &["b_dir/nested", "a_dir/nested"],
+        &[
+            "b_dir/nested/deep.txt",
+            "a_dir/nested/deep.txt",
+            "b_dir/mid.txt",
+            "a_file.txt",
+            "b_file.txt",
+        ],
+    );
+
+    // Combine --dirs-first, --reverse, and --max-depth 1
+    // At depth 1: dirs are a_dir/, b_dir/; others are a_file.txt, b_file.txt, symlink
+    // Normal dirs-first + sort name order: a_dir/, b_dir/, a_file.txt, b_file.txt, symlink
+    // Reversed: symlink, b_file.txt, a_file.txt, b_dir/, a_dir/
+    te.assert_output_ordered(
+        &[
+            "--dirs-first",
+            "--sort",
+            "name",
+            "--reverse",
+            "--max-depth",
+            "1",
+        ],
+        "symlink
+        b_file.txt
+        a_file.txt
+        b_dir/
+        a_dir/",
+    );
+}
+
+#[test]
+fn test_sort_output_formatting_options() {
+    let te = TestEnv::new(&["sub"], &["sub/b.txt", "a.txt"]);
+
+    // Null separator (-0 / --print0) preserves ./ prefix by default and uses NULL terminator
+    te.assert_output_ordered(
+        &["--type", "f", "--sort", "name", "--print0"],
+        "./a.txtNULL
+        ./sub/b.txtNULL",
+    );
+
+    // Custom path separator and --strip-cwd-prefix=never
+    te.assert_output_ordered(
+        &[
+            "--type",
+            "f",
+            "--sort",
+            "name",
+            "--strip-cwd-prefix=never",
+            "--path-separator",
+            "//",
+        ],
+        ".//a.txt
+        .//sub//b.txt",
+    );
+}
