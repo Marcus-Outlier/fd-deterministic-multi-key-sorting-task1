@@ -290,18 +290,12 @@ where
 }
 
 fn compare_bytes(a: &[u8], b: &[u8], case_sensitive: bool, natural: bool) -> Ordering {
-    let ord = if natural {
+    if natural {
         compare_natural_bytes(a, b, case_sensitive)
     } else if case_sensitive {
         a.cmp(b)
     } else {
         compare_case_insensitive_bytes(a, b)
-    };
-
-    if ord == Ordering::Equal && !case_sensitive {
-        a.cmp(b)
-    } else {
-        ord
     }
 }
 
@@ -318,6 +312,7 @@ fn compare_case_insensitive_bytes(a: &[u8], b: &[u8]) -> Ordering {
 fn compare_natural_bytes(a: &[u8], b: &[u8], case_sensitive: bool) -> Ordering {
     let mut ia = 0;
     let mut ib = 0;
+    let mut leading_zero_diff = Ordering::Equal;
 
     while ia < a.len() && ib < b.len() {
         let da = a[ia].is_ascii_digit();
@@ -345,11 +340,14 @@ fn compare_natural_bytes(a: &[u8], b: &[u8], case_sensitive: bool) -> Ordering {
             let ord = trimmed_a
                 .len()
                 .cmp(&trimmed_b.len())
-                .then_with(|| trimmed_a.cmp(trimmed_b))
-                .then_with(|| num_a.len().cmp(&num_b.len()));
+                .then_with(|| trimmed_a.cmp(trimmed_b));
 
             if ord != Ordering::Equal {
                 return ord;
+            }
+
+            if leading_zero_diff == Ordering::Equal {
+                leading_zero_diff = num_a.len().cmp(&num_b.len());
             }
         } else {
             let ca = if case_sensitive {
@@ -371,7 +369,7 @@ fn compare_natural_bytes(a: &[u8], b: &[u8], case_sensitive: bool) -> Ordering {
         }
     }
 
-    a.len().cmp(&b.len())
+    (a.len() - ia).cmp(&(b.len() - ib)).then(leading_zero_diff)
 }
 
 fn strip_leading_zeros(s: &[u8]) -> &[u8] {
@@ -473,7 +471,7 @@ fn compare_by_field(a: &DirEntry, b: &DirEntry, field: SortField, config: &Confi
             mime_for_entry(a).as_bytes(),
             mime_for_entry(b).as_bytes(),
             config.sort_case_sensitive,
-            config.sort_natural,
+            false,
         ),
         SortField::Length => {
             let len_a = a
@@ -516,20 +514,19 @@ pub fn sort_entries(entries: &mut [DirEntry], config: &Config) {
     let has_random = config.sort.contains(&SortField::Random);
 
     if has_random {
-        let mut rng = config
-            .sort_seed
-            .map(fastrand::Rng::with_seed)
-            .unwrap_or_default();
+        let seed = config.sort_seed.unwrap_or_else(|| {
+            let time_nanos = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0);
+            time_nanos ^ fastrand::u64(..)
+        });
 
         let mut keyed: Vec<(u64, usize)> = entries
             .iter()
             .enumerate()
             .map(|(i, entry)| {
-                let key = if let Some(seed) = config.sort_seed {
-                    hash_entry_with_seed(seed, entry.stripped_path(config).as_os_str())
-                } else {
-                    rng.u64(..)
-                };
+                let key = hash_entry_with_seed(seed, entry.stripped_path(config).as_os_str());
                 (key, i)
             })
             .collect();

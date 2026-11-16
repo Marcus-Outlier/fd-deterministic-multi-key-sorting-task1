@@ -3127,22 +3127,62 @@ fn test_sort_with_max_results() {
 
 #[test]
 fn test_sort_natural() {
-    let te = TestEnv::new(&[], &["file10.txt", "file2.txt", "file1.txt", "file20.txt"]);
+    let te = TestEnv::new(
+        &[],
+        &[
+            "file10.txt",
+            "file2.txt",
+            "file1.txt",
+            "file20.txt",
+            "file9.txt",
+            "file007.txt",
+            "file7.txt",
+            "File2.txt",
+        ],
+    );
 
     // Without --sort-natural: lexicographical order
     te.assert_output_ordered(
         &["--type", "f", "--sort", "name"],
-        "file1.txt
+        "file007.txt
+        file1.txt
         file10.txt
+        File2.txt
         file2.txt
-        file20.txt",
+        file20.txt
+        file7.txt
+        file9.txt",
     );
 
-    // With --sort-natural: numeric chunks compared by value
+    // With --sort-natural: numeric chunks compared by value, leading zeros and case differences deterministic
     te.assert_output_ordered(
         &["--type", "f", "--sort", "name", "--sort-natural"],
         "file1.txt
+        File2.txt
         file2.txt
+        file7.txt
+        file007.txt
+        file9.txt
+        file10.txt
+        file20.txt",
+    );
+
+    // With --sort-natural and --sort-case-sensitive: capitals first for non-digits, numbers still natural
+    te.assert_output_ordered(
+        &[
+            "--type",
+            "f",
+            "--sort",
+            "name",
+            "--sort-natural",
+            "--sort-case-sensitive",
+        ],
+        "File2.txt
+        file1.txt
+        file2.txt
+        file7.txt
+        file007.txt
+        file9.txt
         file10.txt
         file20.txt",
     );
@@ -3150,7 +3190,12 @@ fn test_sort_natural() {
 
 #[test]
 fn test_sort_seed() {
-    let te = TestEnv::new(&[], &["a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt"]);
+    let te = TestEnv::new(
+        &[],
+        &[
+            "a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt", "g.txt", "h.txt",
+        ],
+    );
 
     let out1 = te.assert_success_and_get_output(
         ".",
@@ -3167,6 +3212,22 @@ fn test_sort_seed() {
 
     assert_eq!(out1.stdout, out2.stdout);
     assert_ne!(out1.stdout, out3.stdout);
+
+    // Without seed: runs should vary across invocations
+    let unseeded1 = te.assert_success_and_get_output(".", &["--type", "f", "--sort", "random"]);
+    let mut saw_different = false;
+    for _ in 0..5 {
+        let unseeded_next =
+            te.assert_success_and_get_output(".", &["--type", "f", "--sort", "random"]);
+        if unseeded_next.stdout != unseeded1.stdout {
+            saw_different = true;
+            break;
+        }
+    }
+    assert!(
+        saw_different,
+        "unseeded random sort should produce different orders across runs"
+    );
 }
 
 #[test]
